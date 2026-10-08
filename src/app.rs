@@ -9,6 +9,7 @@ use image::RgbaImage;
 use crate::{
     application::{PreviewWorker, load_adjustments},
     domain::{ColorAdjustments, ImageData},
+    memory::trim_working_set,
     platform::{DisplayFilter, HotkeyManager, create_display_filter},
     tray::{TrayAction, TrayController},
 };
@@ -101,6 +102,7 @@ impl eframe::App for ColorApp {
             } else {
                 tracing::info!("cierre de ventana interceptado; ocultando aplicación en el tray");
                 context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                trim_working_set();
                 context.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             }
         }

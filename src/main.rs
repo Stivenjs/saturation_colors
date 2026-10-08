@@ -2,6 +2,7 @@ mod app;
 mod application;
 mod domain;
 mod error;
+mod memory;
 mod platform;
 mod tray;
 
