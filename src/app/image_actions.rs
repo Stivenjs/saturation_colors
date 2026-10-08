@@ -79,6 +79,7 @@ impl ColorApp {
         match load_profile(&path) {
             Ok(profile) => {
                 self.adjustments = profile.adjustments;
+                self.persist_adjustments();
                 self.reprocess(context);
                 self.status = format!("Perfil cargado: {}", path.display());
             }

@@ -7,9 +7,9 @@ use eframe::egui::{self, TextureHandle};
 use image::RgbaImage;
 
 use crate::{
-    application::PreviewWorker,
+    application::{PreviewWorker, load_adjustments},
     domain::{ColorAdjustments, ImageData},
-    platform::{DisplayFilter, Hotkey, HotkeyManager, create_display_filter},
+    platform::{DisplayFilter, HotkeyManager, create_display_filter},
     tray::{TrayAction, TrayController},
 };
 
@@ -34,16 +34,18 @@ pub struct ColorApp {
 
 impl ColorApp {
     pub fn new(creation_context: &eframe::CreationContext<'_>) -> Self {
-        let mut hotkey_manager = HotkeyManager::new();
-        if let Err(error) = hotkey_manager.register(Hotkey::default()) {
+        let mut hotkey_manager = HotkeyManager::new(creation_context.egui_ctx.clone());
+        let saved_hotkey = HotkeyManager::load_saved();
+        if let Err(error) = hotkey_manager.register(saved_hotkey) {
             tracing::warn!(%error, "no se pudo registrar el atajo global");
         }
+        let adjustments = load_adjustments();
         Self {
             source: None,
             preview: None,
             source_texture: None,
             preview_texture: None,
-            adjustments: ColorAdjustments::default(),
+            adjustments,
             display_filter: create_display_filter(),
             display_filter_enabled: false,
             status: "Abre una imagen para comenzar".to_string(),

@@ -301,10 +301,9 @@ impl AmdDisplayFilter {
                             "AMD: display con saturación disponible"
                         );
                         targets.push(DisplayTarget {
-                            label: format!(
-                                "AMD - {} / {}",
-                                c_string(&info.display_name),
-                                c_string(&display_info.display_name)
+                            label: display_label(
+                                &c_string(&info.display_name),
+                                &c_string(&display_info.display_name),
                             ),
                         });
                         target_handles.push((adapter, display_index));
@@ -456,4 +455,17 @@ fn c_string(value: &[i8]) -> String {
         .take_while(|byte| *byte != 0)
         .collect::<Vec<_>>();
     String::from_utf8_lossy(&bytes).trim().to_string()
+}
+
+fn display_label(adapter_name: &str, display_name: &str) -> String {
+    let output = adapter_name
+        .trim()
+        .strip_prefix(r"\\.\")
+        .unwrap_or(adapter_name.trim());
+    let monitor = if display_name.trim().is_empty() {
+        "Monitor AMD"
+    } else {
+        display_name.trim()
+    };
+    format!("AMD · {output} · {monitor}")
 }

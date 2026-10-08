@@ -1,10 +1,13 @@
 use eframe::egui;
 
+use crate::application::save_adjustments;
+
 use super::ColorApp;
 
 impl ColorApp {
     pub(super) fn reset(&mut self, context: &egui::Context) {
         self.adjustments = crate::domain::ColorAdjustments::default();
+        self.persist_adjustments();
         self.reprocess(context);
         self.status = if self.display_filter_enabled {
             match self.display_filter.apply(self.adjustments) {
@@ -16,6 +19,12 @@ impl ColorApp {
         } else {
             "Ajustes restablecidos".to_string()
         };
+    }
+
+    pub(super) fn persist_adjustments(&self) {
+        if let Err(error) = save_adjustments(self.adjustments) {
+            tracing::warn!(%error, "no se pudieron guardar los ajustes de color");
+        }
     }
 
     pub(super) fn toggle_display_filter(&mut self) {

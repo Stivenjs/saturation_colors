@@ -73,12 +73,23 @@ impl ColorApp {
                     &mut self.adjustments.contrast,
                     ColorAdjustments::CONTRAST_RANGE,
                 );
-                changed |= slider(
-                    ui,
-                    "Saturación",
-                    &mut self.adjustments.saturation,
-                    ColorAdjustments::SATURATION_RANGE,
-                );
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.strong("Saturación");
+                        ui.add_space(4.0);
+                        ui.small("Digital Vibrance");
+                    });
+                    changed |= slider(
+                        ui,
+                        "Nivel",
+                        &mut self.adjustments.saturation,
+                        ColorAdjustments::SATURATION_RANGE,
+                    );
+                    ui.small(format!(
+                        "Nivel: {}%  ·  Normal: 100%",
+                        (self.adjustments.saturation * 100.0).round() as i32
+                    ));
+                });
                 changed |= slider(
                     ui,
                     "Temperatura",
@@ -98,6 +109,7 @@ impl ColorApp {
                     ColorAdjustments::GAMMA_RANGE,
                 );
                 if changed {
+                    self.persist_adjustments();
                     self.reprocess(context);
                     if self.display_filter_enabled {
                         self.status = match self.display_filter.apply(self.adjustments) {
@@ -120,13 +132,14 @@ impl ColorApp {
             });
 
         ui.add_space(8.0);
-        egui::CollapsingHeader::new("Filtro global")
+        egui::CollapsingHeader::new("Filtro de pantalla")
             .default_open(true)
             .show(ui, |ui| self.render_filter_section(ui));
     }
 
     fn render_filter_section(&mut self, ui: &mut egui::Ui) {
-        ui.label(format!("Backend: {}", self.display_filter.backend_name()));
+        ui.strong("Filtro de pantalla");
+        ui.small(format!("Motor: {}", self.display_filter.backend_name()));
         ui.small(if self.display_filter_enabled {
             "Estado: activo"
         } else {
@@ -140,21 +153,23 @@ impl ColorApp {
             ui.add_space(4.0);
             ui.colored_label(
                 egui::Color32::YELLOW,
-                "La gamma de Windows aplica el cambio al monitor seleccionado.",
+                "El filtro se aplica al monitor seleccionado.",
             );
-            ui.small("La saturación requiere un backend nativo AMD ADL o NVIDIA NVAPI.");
+            ui.small("La saturación global requiere AMD ADL o NVIDIA NVAPI.");
         }
 
         let targets = self.display_filter.targets();
         if !targets.is_empty() {
-            ui.label("Destino del filtro");
+            ui.add_space(6.0);
+            ui.label("Monitor de destino");
             let selected_label = targets
                 .get(self.selected_target)
-                .map_or("Seleccionar destino", |target| target.label.as_str());
+                .map_or("Seleccionar monitor", |target| target.label.as_str());
             egui::ComboBox::from_label("Destino")
                 .selected_text(selected_label)
-                .width(215.0)
+                .width(ui.available_width().max(180.0))
                 .show_ui(ui, |ui| {
+                    ui.set_min_width(270.0);
                     for (index, target) in targets.iter().enumerate() {
                         if ui
                             .selectable_value(&mut self.selected_target, index, &target.label)
@@ -170,13 +185,13 @@ impl ColorApp {
                         }
                     }
                 });
-            ui.small("Selecciona el monitor donde se aplicará el filtro.");
+            ui.small("Elige la pantalla que recibirá el filtro global.");
         } else {
             ui.label("No hay monitores controlables disponibles.");
         }
 
-        ui.add_space(6.0);
-        ui.label("Hardware detectado");
+        ui.add_space(10.0);
+        ui.strong("Hardware detectado");
         let gpus = detected_gpus();
         if gpus.is_empty() {
             ui.small("No se detectaron GPUs en Windows.");
@@ -190,9 +205,9 @@ impl ColorApp {
                         .backend_name()
                         .starts_with("Windows Gamma")
                     {
-                        ui.small("(detectada; control por monitor)");
+                        ui.small("Detectada · control por monitor");
                     } else {
-                        ui.small("(detectada; backend activo)");
+                        ui.small("Detectada · backend activo");
                     }
                 });
             }
@@ -235,7 +250,7 @@ fn slider(
 ) -> bool {
     ui.horizontal(|ui| {
         ui.allocate_ui_with_layout(
-            egui::vec2(82.0, 0.0),
+            egui::vec2(88.0, 0.0),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| ui.label(label),
         );
