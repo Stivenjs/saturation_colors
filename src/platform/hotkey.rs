@@ -137,6 +137,7 @@ mod windows {
                 while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {
                     if message.message == WM_HOTKEY {
                         let _ = sender.send(HotkeyEvent::Toggle);
+                        context.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                         context.request_repaint();
                     }
                 }

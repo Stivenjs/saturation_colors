@@ -9,8 +9,8 @@ use std::sync::OnceLock;
 type QueryInterface = unsafe extern "C" fn(u32) -> *const core::ffi::c_void;
 type Initialize = unsafe extern "C" fn() -> i32;
 type EnumDisplayHandle = unsafe extern "C" fn(u32, *mut *mut core::ffi::c_void) -> i32;
-type GetDvcInfo = unsafe extern "C" fn(*mut core::ffi::c_void, *mut NvDisplayDvcInfo) -> i32;
-type SetDvcLevel = unsafe extern "C" fn(*mut core::ffi::c_void, i32) -> i32;
+type GetDvcInfo = unsafe extern "C" fn(*mut core::ffi::c_void, u32, *mut NvDisplayDvcInfo) -> i32;
+type SetDvcLevel = unsafe extern "C" fn(*mut core::ffi::c_void, u32, i32) -> i32;
 
 #[repr(C)]
 struct NvDisplayDvcInfo {
@@ -32,28 +32,16 @@ static DIAGNOSTICS: OnceLock<String> = OnceLock::new();
 
 pub fn diagnostics() -> &'static str {
     DIAGNOSTICS
-        .get_or_init(|| {
-            "NVAPI desactivado por seguridad. Activa SATURATION_COLORS_ENABLE_NVAPI=1 solo para pruebas."
-                .to_string()
-        })
+        .get_or_init(|| "NVAPI no se ha inicializado.".to_string())
         .as_str()
 }
 
 impl NvidiaDisplayFilter {
     pub fn load() -> Option<Self> {
-        // NVAPI exposes an undocumented C ABI through QueryInterface. Keep it
-        // opt-in until the exact driver ABI has been validated on the target
-        // machine; an ABI mismatch terminates the process with an access
-        // violation and cannot be handled as a Rust Result.
-        if std::env::var_os("SATURATION_COLORS_ENABLE_NVAPI").is_none() {
-            let _ = DIAGNOSTICS
-                .set("NVAPI desactivado por seguridad; no se enumeran salidas NVIDIA.".to_string());
-            tracing::info!(
-                "NVAPI está disponible como backend experimental; usando gamma ramp por defecto"
-            );
-            return None;
-        }
-        tracing::info!("NVIDIA: NVAPI habilitado explícitamente; cargando nvapi64.dll");
+        // NVAPI is implemented by the installed NVIDIA driver. The DLL must
+        // be loaded at runtime so systems without an NVIDIA driver can still
+        // use the application and the gamma fallback.
+        tracing::info!("NVIDIA: cargando nvapi64.dll");
         let library = unsafe {
             Library::new("nvapi64.dll")
                 .map_err(|error| {
@@ -80,11 +68,26 @@ impl NvidiaDisplayFilter {
                 "NVIDIA: NvAPI_Initialize ejecutado"
             );
             if initialize_status != 0 {
+                let _ = DIAGNOSTICS.set(format!(
+                    "NvAPI_Initialize falló con código {initialize_status}"
+                ));
                 return None;
             }
-            let enum_display = query_function::<EnumDisplayHandle>(&query, 0x9ABDD40D)?;
-            let get_info = query_function::<GetDvcInfo>(&query, 0x4085DE45)?;
-            let set_level = query_function::<SetDvcLevel>(&query, 0x172409B4)?;
+            let Some(enum_display) = query_function::<EnumDisplayHandle>(&query, 0x9ABDD40D) else {
+                let _ =
+                    DIAGNOSTICS.set("NVAPI no expone NvAPI_EnumNvidiaDisplayHandle".to_string());
+                return None;
+            };
+            let Some(get_info) = query_function::<GetDvcInfo>(&query, 0x4085DE45) else {
+                let _ =
+                    DIAGNOSTICS.set("NVAPI no expone la consulta de Digital Vibrance".to_string());
+                return None;
+            };
+            let Some(set_level) = query_function::<SetDvcLevel>(&query, 0x172409B4) else {
+                let _ =
+                    DIAGNOSTICS.set("NVAPI no expone el ajuste de Digital Vibrance".to_string());
+                return None;
+            };
             let mut displays = Vec::new();
             for index in 0..16 {
                 let mut handle = std::ptr::null_mut();
@@ -96,6 +99,9 @@ impl NvidiaDisplayFilter {
             }
             tracing::info!(displays = displays.len(), "NVIDIA: displays enumerados");
             if displays.is_empty() {
+                let _ = DIAGNOSTICS.set(
+                    "NVAPI se inicializó, pero no encontró salidas NVIDIA activas".to_string(),
+                );
                 return None;
             }
             Some(Self {
@@ -111,7 +117,14 @@ impl NvidiaDisplayFilter {
 
 unsafe fn query_function<T>(query: &QueryInterface, id: u32) -> Option<T> {
     let pointer = unsafe { query(id) };
-    (!pointer.is_null()).then(|| unsafe { pointer.cast::<T>().read() })
+    if pointer.is_null() {
+        return None;
+    }
+
+    // QueryInterface returns the function address itself. Reading from that
+    // address would interpret the machine code bytes as a function pointer.
+    // Reinterpret the pointer value instead.
+    Some(unsafe { std::mem::transmute_copy(&pointer) })
 }
 
 impl DisplayFilter for NvidiaDisplayFilter {
@@ -129,7 +142,7 @@ impl DisplayFilter for NvidiaDisplayFilter {
                         min_level: 0,
                         max_level: 0,
                     };
-                    if (self.get_info)(display, &mut info) == 0 {
+                    if (self.get_info)(display, 0, &mut info) == 0 {
                         self.original
                             .push((index as i32, info.current_level, info.max_level));
                     }
@@ -142,7 +155,15 @@ impl DisplayFilter for NvidiaDisplayFilter {
             }
             for &(index, _, max_level) in &self.original {
                 let level = (adjustments.saturation * max_level as f32).round() as i32;
-                if (self.set_level)(self.displays[index as usize], level.clamp(0, max_level)) != 0 {
+                let status =
+                    (self.set_level)(self.displays[index as usize], 0, level.clamp(0, max_level));
+                tracing::debug!(
+                    index,
+                    level,
+                    status,
+                    "NVIDIA: resultado de Digital Vibrance"
+                );
+                if status != 0 {
                     return Err(AppError::DisplayFilterUnavailable(
                         "NVAPI no pudo cambiar Digital Vibrance".to_string(),
                     ));
@@ -159,7 +180,14 @@ impl DisplayFilter for NvidiaDisplayFilter {
         );
         unsafe {
             for &(index, value, _) in &self.original {
-                if (self.set_level)(self.displays[index as usize], value) != 0 {
+                let status = (self.set_level)(self.displays[index as usize], 0, value);
+                tracing::debug!(
+                    index,
+                    value,
+                    status,
+                    "NVIDIA: restauración de Digital Vibrance"
+                );
+                if status != 0 {
                     return Err(AppError::DisplayFilterUnavailable(
                         "NVAPI no pudo restaurar Digital Vibrance".to_string(),
                     ));
