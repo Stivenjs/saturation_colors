@@ -34,7 +34,10 @@ impl ColorApp {
                     self.display_filter_enabled = false;
                     "Filtro global desactivado".to_string()
                 }
-                Err(error) => error.to_string(),
+                Err(error) => {
+                    self.display_filter_enabled = true;
+                    error.to_string()
+                }
             };
         } else {
             self.status = match self.display_filter.apply(self.adjustments) {

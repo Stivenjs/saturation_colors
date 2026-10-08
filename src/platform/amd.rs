@@ -402,16 +402,39 @@ impl DisplayFilter for AmdDisplayFilter {
             entries = self.original.len(),
             "AMD: restaurando valores originales"
         );
+        let mut failed = false;
+        let mut restored = Vec::with_capacity(self.original.len());
         unsafe {
-            for &(adapter, display, value) in &self.original {
-                if (self.color_set)(adapter, display, ADL_DISPLAY_COLOR_SATURATION, value) != 0 {
-                    return Err(AppError::DisplayFilterUnavailable(
-                        "ADL no pudo restaurar la saturación".to_string(),
-                    ));
+            for &(adapter, display_index, value) in &self.original {
+                let status =
+                    (self.color_set)(adapter, display_index, ADL_DISPLAY_COLOR_SATURATION, value);
+                tracing::debug!(
+                    adapter,
+                    display_index,
+                    value,
+                    status,
+                    "AMD: resultado de restauración"
+                );
+                if status == 0 {
+                    restored.push((adapter, display_index, value));
+                } else {
+                    failed = true;
+                    tracing::error!(
+                        adapter,
+                        display_index,
+                        value,
+                        status,
+                        "AMD: no se pudo restaurar la saturación"
+                    );
                 }
             }
         }
-        self.original.clear();
+        self.original.retain(|entry| !restored.contains(entry));
+        if failed {
+            return Err(AppError::DisplayFilterUnavailable(
+                "ADL no pudo restaurar la saturación; se reintentará al cerrar".to_string(),
+            ));
+        }
         Ok(())
     }
 
